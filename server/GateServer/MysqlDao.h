@@ -1,18 +1,20 @@
 #pragma once
 
 #include "const.h"
-#include <mysql++/myset.h>
-#include <mysql++/mysql++.h>
+
 #include <thread>
+
+#include <iostream>
+#include <mariadb/conncpp.hpp>
 
 class SqlConnection
 {
 public:
-    SqlConnection(mysqlpp::Connection* con, int64_t lasttime)
+    SqlConnection(sql::Connection* con, int64_t lasttime)
         : _con(con)
         , _last_oper_time(lasttime)
     {}
-    std::unique_ptr<mysqlpp::Connection> _con;
+    std::unique_ptr<sql::Connection> _con;
     int64_t _last_oper_time;
 };
 
@@ -34,20 +36,17 @@ public:
         try {
             std::cout << "MySQL 连接池大小为：" << poolSize_ << std::endl;
             for (int i = 0; i < poolSize_; ++i) {
-                mysqlpp::Connection* con = new mysqlpp::Connection(false);
-                if (con->connect(schema_.c_str(), url_.c_str(), user_.c_str(), pass_.c_str())) {
-                    std::cout << "MySQL 连接成功!" << std::endl;
-                    // 获取当前时间戳
-                    auto currentTime = std::chrono::system_clock::now().time_since_epoch();
-                    // 将时间戳转换为秒
-                    long long timestamp
-                        = std::chrono::duration_cast<std::chrono::seconds>(currentTime).count();
-                    pool_.push(std::make_unique<SqlConnection>(con, timestamp));
-                } else {
-                    std::cout << "delete con" << std::endl;
-                    delete con;
-                    throw mysqlpp::ConnectionFailed("Failed to connect to database");
-                }
+                sql::Driver* driver = sql::mariadb::get_driver_instance();
+                auto* con = driver->connect(url_, user_, pass_);
+                std::cout << "MySQL 连接成功!" << std::endl;
+                con->setSchema(schema_);
+
+                // 获取当前时间戳
+                auto currentTime = std::chrono::system_clock::now().time_since_epoch();
+                // 将时间戳转换为秒
+                long long timestamp = std::chrono::duration_cast<std::chrono::seconds>(currentTime)
+                                          .count();
+                pool_.push(std::make_unique<SqlConnection>(con, timestamp));
             }
 
             _check_thread = std::thread([this]() {
@@ -58,7 +57,7 @@ public:
             });
 
             _check_thread.detach();
-        } catch (mysqlpp::Exception& e) {
+        } catch (sql::SQLException& e) {
             // 处理异常
             std::cout << url_ << ", " << user_ << ", " << pass_ << ", " << schema_ << ", "
                       << poolSize_ << std::endl;
@@ -78,35 +77,23 @@ public:
             auto con = std::move(pool_.front());
             pool_.pop();
             Defer defer([this, &con]() { pool_.push(std::move(con)); });
-
-            std::cout << "mysql pool num: " << pool_.size() << std::endl;
-
-            if (!con) {
-                std::cout << "空指针!!! Connection is null" << std::endl;
-                continue;
-            }
-            std::cout << "timestamp: " << timestamp << std::endl;
-            std::cout << "con->_last_oper_time: " << con->_last_oper_time << std::endl;
             if (timestamp - con->_last_oper_time < 5) {
-                std::cout << "timestamp - con->_last_oper_time:: "
-                          << timestamp - con->_last_oper_time << std::endl;
                 continue;
             }
 
             try {
-                //mysqlpp::Query query = con->_con->query("SELECT 1");
-                //query.execute();
+                std::unique_ptr<sql::Statement> stmt(con->_con->createStatement());
+                stmt->executeQuery("SELECT 1");
                 con->_last_oper_time = timestamp;
-            } catch (mysqlpp::Exception& e) {
+                //std::cout << "execute timer alive query , cur is " << timestamp << std::endl;
+            } catch (sql::SQLException& e) {
                 std::cout << "Error keeping connection alive: " << e.what() << std::endl;
                 // 重新创建连接并替换旧的连接
-                mysqlpp::Connection* newcon = new mysqlpp::Connection(false);
-                if (newcon->connect(schema_.c_str(), url_.c_str(), user_.c_str(), pass_.c_str())) {
-                    con->_con.reset(newcon);
-                    con->_last_oper_time = timestamp;
-                } else {
-                    delete newcon;
-                }
+                sql::Driver* driver = sql::mariadb::get_driver_instance();
+                auto* newcon = driver->connect(url_, user_, pass_);
+                newcon->setSchema(schema_);
+                con->_con.reset(newcon);
+                con->_last_oper_time = timestamp;
             }
         }
     }

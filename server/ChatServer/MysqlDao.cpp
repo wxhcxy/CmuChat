@@ -26,28 +26,30 @@ int MysqlDao::RegUser(const std::string& name, const std::string& email, const s
             return -1;
         }
 
-        // 准备调用存储过程
-        mysqlpp::Query query = con->_con->query();
-        query << "CALL reg_user(" << mysqlpp::quote << name << ", " << mysqlpp::quote << email
-              << ", " << mysqlpp::quote << pwd << ", @result)";
+        std::unique_ptr<sql::PreparedStatement> stmt(
+            con->_con->prepareStatement("CALL reg_user(?,?,?,@result)"));
 
-        // 执行存储过程
-        query.execute();
+        stmt->setString(1, name);
+        stmt->setString(2, email);
+        stmt->setString(3, pwd);
 
-        // 获取存储过程的输出参数
-        mysqlpp::StoreQueryResult res = query.store();
-        if (res && res.num_rows() > 0) {
-            int result = res[0]["result"];
+        stmt->execute();
+
+        std::unique_ptr<sql::Statement> stmtResult(con->_con->createStatement());
+        std::unique_ptr<sql::ResultSet> res(stmtResult->executeQuery("SELECT @result AS result"));
+        if (res->next()) {
+            int result = res->getInt("result");
             std::cout << "Result: " << result << std::endl;
             pool_->returnConnection(std::move(con));
             return result;
         }
-
         pool_->returnConnection(std::move(con));
         return -1;
-    } catch (mysqlpp::Exception& e) {
+    } catch (sql::SQLException& e) {
         pool_->returnConnection(std::move(con));
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return -1;
     }
 }
@@ -58,31 +60,31 @@ bool MysqlDao::CheckEmail(const std::string& name, const std::string& email)
     auto con = pool_->getConnection();
     try {
         if (con == nullptr) {
-            //pool_->returnConnection(std::move(con));
             return false;
         }
 
-        // 准备查询语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT email FROM user WHERE name = " << mysqlpp::quote << name;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("SELECT email FROM user WHERE name = ?"));
 
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
+        pstmt->setString(1, name);
 
-        // 遍历结果集
-        if (res && res.num_rows() > 0) {
-            std::string db_email = res[0]["email"].c_str();
-            std::cout << "Check Email: " << db_email << std::endl;
-            if (email != db_email) {
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+
+        while (res->next()) {
+            std::cout << "Check Email: " << res->getString("email") << std::endl;
+            if (email != res->getString("email")) {
                 pool_->returnConnection(std::move(con));
                 return false;
             }
             pool_->returnConnection(std::move(con));
             return true;
         }
-    } catch (mysqlpp::Exception& e) {
+        return true;
+    } catch (sql::SQLException& e) {
         pool_->returnConnection(std::move(con));
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
 }
@@ -93,24 +95,25 @@ bool MysqlDao::UpdatePwd(const std::string& name, const std::string& newpwd)
     auto con = pool_->getConnection();
     try {
         if (con == nullptr) {
-            //pool_->returnConnection(std::move(con));
             return false;
         }
 
-        // 准备查询语句
-        mysqlpp::Query query = con->_con->query();
-        query << "UPDATE user SET pwd = " << mysqlpp::quote << newpwd
-              << " WHERE name = " << mysqlpp::quote << name;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("UPDATE user SET pwd = ? WHERE name = ?"));
 
-        // 执行更新
-        query.execute();
+        pstmt->setString(2, name);
+        pstmt->setString(1, newpwd);
 
-        std::cout << "Password updated for user: " << name << std::endl;
+        int updateCount = pstmt->executeUpdate();
+
+        std::cout << "Updated rows: " << updateCount << std::endl;
         pool_->returnConnection(std::move(con));
         return true;
-    } catch (mysqlpp::Exception& e) {
+    } catch (sql::SQLException& e) {
         pool_->returnConnection(std::move(con));
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
 }
@@ -119,45 +122,43 @@ bool MysqlDao::UpdatePwd(const std::string& name, const std::string& newpwd)
 bool MysqlDao::CheckPwd(const std::string& name, const std::string& pwd, UserInfo& userInfo)
 {
     auto con = pool_->getConnection();
+
+    if (con == nullptr) {
+        return false;
+    }
+
+    Defer defer([this, &con]() {
+        pool_->returnConnection(std::move(con));
+    }); //超出作用域，析构函数会调用lambda表达式,自己定义的Defer类
+
     try {
-        if (con == nullptr) {
+        // 准备SQL语句
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("SELECT * FROM user WHERE name = ?"));
+        pstmt->setString(1, name);
+
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+        std::string origin_pwd = "";
+
+        while (res->next()) {
+            origin_pwd = res->getString("pwd");
+
+            std::cout << "Password: " << origin_pwd << std::endl;
+            break;
+        }
+
+        if (pwd != origin_pwd) {
             return false;
         }
-
-        Defer defer([this, &con]() {
-            pool_->returnConnection(std::move(con));
-        }); //超出作用域，析构函数会调用lambda表达式,自己定义的Defer类
-
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT * FROM user WHERE name = " << mysqlpp::quote << name;
-
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
-
-        // 检查结果
-        if (res && res.num_rows() > 0) {
-            std::string origin_pwd = res[0]["pwd"].c_str();
-            std::cout << "Password: " << origin_pwd << std::endl;
-
-            if (pwd != origin_pwd) {
-                return false;
-            }
-            if (pwd == origin_pwd) {
-                userInfo.email = res[0]["email"].c_str();
-                userInfo.name = name;
-                userInfo.uid = res[0]["uid"];
-                userInfo.pwd = origin_pwd;
-                //pool_->returnConnection(std::move(con));
-                return true;
-            }
-        }
-
-        //pool_->returnConnection(std::move(con));
-        return false;
-    } catch (mysqlpp::Exception& e) {
-        //pool_->returnConnection(std::move(con));
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+        userInfo.name = name;
+        userInfo.email = res->getString("email");
+        userInfo.uid = res->getInt("uid");
+        userInfo.pwd = origin_pwd;
+        return true;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
 }
@@ -172,28 +173,30 @@ std::shared_ptr<UserInfo> MysqlDao::GetUser(int uid)
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT * FROM user WHERE uid = " << mysqlpp::quote << uid;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("SELECT * FROM user WHERE uid = ?"));
+        pstmt->setInt(1, uid);
 
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
-
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
         std::shared_ptr<UserInfo> user_ptr = nullptr;
-        if (res && res.num_rows() > 0) {
-            user_ptr = std::make_shared<UserInfo>();
-            user_ptr->pwd = std::string(res[0]["pwd"].c_str());
-            user_ptr->email = std::string(res[0]["email"].c_str());
-            user_ptr->name = std::string(res[0]["name"].c_str());
-            user_ptr->nick = std::string(res[0]["nick"].c_str());
-            user_ptr->desc = std::string(res[0]["desc"].c_str());
-            user_ptr->sex = res[0]["sex"];
-            user_ptr->icon = std::string(res[0]["icon"].c_str());
+
+        while (res->next()) {
+            user_ptr.reset(new UserInfo);
+            user_ptr->pwd = res->getString("pwd");
+            user_ptr->email = res->getString("email");
+            user_ptr->name = res->getString("name");
+            user_ptr->nick = res->getString("nick");
+            user_ptr->desc = res->getString("desc");
+            user_ptr->sex = res->getInt("sex");
+            user_ptr->icon = res->getString("icon");
             user_ptr->uid = uid;
+            break;
         }
         return user_ptr;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return nullptr;
     }
 }
@@ -208,27 +211,29 @@ std::shared_ptr<UserInfo> MysqlDao::GetUser(std::string name)
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT * FROM user WHERE name = " << mysqlpp::quote << name;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("SELECT * FROM user WHERE name = ?"));
+        pstmt->setString(1, name);
 
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
-
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
         std::shared_ptr<UserInfo> user_ptr = nullptr;
-        if (res && res.num_rows() > 0) {
-            user_ptr = std::make_shared<UserInfo>();
-            user_ptr->pwd = std::string(res[0]["pwd"].c_str());
-            user_ptr->email = std::string(res[0]["email"].c_str());
-            user_ptr->name = std::string(res[0]["name"].c_str());
-            user_ptr->nick = std::string(res[0]["nick"].c_str());
-            user_ptr->desc = std::string(res[0]["desc"].c_str());
-            user_ptr->sex = res[0]["sex"];
-            user_ptr->uid = res[0]["uid"];
+
+        while (res->next()) {
+            user_ptr.reset(new UserInfo);
+            user_ptr->pwd = res->getString("pwd");
+            user_ptr->email = res->getString("email");
+            user_ptr->name = res->getString("name");
+            user_ptr->nick = res->getString("nick");
+            user_ptr->desc = res->getString("desc");
+            user_ptr->sex = res->getInt("sex");
+            user_ptr->uid = res->getInt("uid");
+            break;
         }
         return user_ptr;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return nullptr;
     }
 }
@@ -243,19 +248,24 @@ bool MysqlDao::AddFriendApply(const int& from, const int& to)
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "INSERT INTO friend_apply (from_uid, to_uid) VALUES (" << from << ", " << to
-              << ") "
-              << "ON DUPLICATE KEY UPDATE from_uid = from_uid, to_uid = to_uid";
+        std::unique_ptr<sql::PreparedStatement> pstmt(con->_con->prepareStatement(
+            "INSERT INTO friend_apply (from_uid, to_uid) values (?,?) "
+            "ON DUPLICATE KEY UPDATE from_uid = from_uid, to_uid = to_uid"));
+        pstmt->setInt(1, from); // from id
+        pstmt->setInt(2, to);
 
-        // 执行更新
-        query.execute();
+        int rowAffected = pstmt->executeUpdate();
+        if (rowAffected < 0) {
+            return false;
+        }
         return true;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
+    return true;
 }
 
 bool MysqlDao::GetApplyList(int touid,
@@ -271,29 +281,32 @@ bool MysqlDao::GetApplyList(int touid,
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT apply.from_uid, apply.status, user.name, user.nick, user.sex "
-              << "FROM friend_apply AS apply JOIN user ON apply.from_uid = user.uid "
-              << "WHERE apply.to_uid = " << touid << " AND apply.id > " << begin << " "
-              << "ORDER BY apply.id ASC LIMIT " << limit;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("select apply.from_uid, apply.status, user.name, "
+                                        "user.nick, user.sex from friend_apply as apply join user "
+                                        "on apply.from_uid = user.uid where apply.to_uid = ? "
+                                        "and apply.id > ? order by apply.id ASC LIMIT ? "));
 
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
+        pstmt->setInt(1, touid);
+        pstmt->setInt(2, begin);
+        pstmt->setInt(3, limit);
 
-        // 遍历结果集
-        for (const auto& row : res) {
-            std::string name = std::string(row["name"].c_str());
-            int uid = row["from_uid"];
-            int status = row["status"];
-            std::string nick = std::string(row["nick"].c_str());
-            int sex = row["sex"];
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
+
+        while (res->next()) {
+            std::string name = res->getString("name").c_str();
+            int uid = res->getInt("from_uid");
+            int status = res->getInt("status");
+            std::string nick = res->getString("nick").c_str();
+            int sex = res->getInt("sex");
             auto apply_ptr = std::make_shared<ApplyInfo>(uid, name, "", "", nick, sex, status);
             applyList.push_back(apply_ptr);
         }
         return true;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
 }
@@ -308,18 +321,26 @@ bool MysqlDao::AuthFriendApply(const int& from, const int& to)
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "UPDATE friend_apply SET status = 1 WHERE from_uid = " << to
-              << " AND to_uid = " << from;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("UPDATE friend_apply SET status = 1 "
+                                        "WHERE from_uid = ? AND to_uid = ?"));
 
-        // 执行更新
-        query.execute();
+        pstmt->setInt(1, to); // from id
+        pstmt->setInt(2, from);
+
+        int rowAffected = pstmt->executeUpdate();
+        if (rowAffected < 0) {
+            return false;
+        }
         return true;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
+
+    return true;
 }
 
 bool MysqlDao::AddFriend(const int& from, const int& to, std::string back_name)
@@ -333,29 +354,54 @@ bool MysqlDao::AddFriend(const int& from, const int& to, std::string back_name)
 
     try {
         // 开始事务
-        con->_con->query("START TRANSACTION");
+        con->_con->setAutoCommit(false);
 
         // 插入认证方好友数据
-        mysqlpp::Query query1 = con->_con->query();
-        query1 << "INSERT IGNORE INTO friend (self_id, friend_id, back) VALUES (" << from << ", "
-               << to << ", " << mysqlpp::quote << back_name << ")";
-        query1.execute();
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("INSERT IGNORE INTO friend(self_id, friend_id, back) "
+                                        "VALUES (?, ?, ?) "));
+        pstmt->setInt(1, from); // from id
+        pstmt->setInt(2, to);
+        pstmt->setString(3, back_name);
+
+        int rowAffected = pstmt->executeUpdate();
+        if (rowAffected < 0) {
+            con->_con->rollback();
+            return false;
+        }
 
         // 插入申请方好友数据
-        mysqlpp::Query query2 = con->_con->query();
-        query2 << "INSERT IGNORE INTO friend (self_id, friend_id, back) VALUES (" << to << ", "
-               << from << ", '')";
-        query2.execute();
+        std::unique_ptr<sql::PreparedStatement> pstmt2(
+            con->_con->prepareStatement("INSERT IGNORE INTO friend(self_id, friend_id, back) "
+                                        "VALUES (?, ?, ?) "));
+
+        pstmt2->setInt(1, to); // from id
+        pstmt2->setInt(2, from);
+        pstmt2->setString(3, "");
+
+        int rowAffected2 = pstmt2->executeUpdate();
+        if (rowAffected2 < 0) {
+            con->_con->rollback();
+            return false;
+        }
 
         // 提交事务
-        con->_con->query("COMMIT");
+        con->_con->commit();
+        std::cout << "addfriend insert friends success" << std::endl;
+
         return true;
-    } catch (mysqlpp::Exception& e) {
+    } catch (sql::SQLException& e) {
         // 回滚事务
-        con->_con->query("ROLLBACK");
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+        if (con) {
+            con->_con->rollback();
+        }
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
+
+    return true;
 }
 
 bool MysqlDao::GetFriendList(int self_id, std::vector<std::shared_ptr<UserInfo>>& user_info_list)
@@ -368,28 +414,32 @@ bool MysqlDao::GetFriendList(int self_id, std::vector<std::shared_ptr<UserInfo>>
     Defer defer([this, &con]() { pool_->returnConnection(std::move(con)); });
 
     try {
-        // 准备SQL语句
-        mysqlpp::Query query = con->_con->query();
-        query << "SELECT * FROM friend WHERE self_id = " << self_id;
+        std::unique_ptr<sql::PreparedStatement> pstmt(
+            con->_con->prepareStatement("select * from friend where self_id = ? "));
 
-        // 执行查询
-        mysqlpp::StoreQueryResult res = query.store();
+        pstmt->setInt(1, self_id);
 
-        // 遍历结果集
-        for (const auto& row : res) {
-            int friend_id = row["friend_id"];
-            std::string back = std::string(row["back"].c_str());
+        std::unique_ptr<sql::ResultSet> res(pstmt->executeQuery());
 
-            // 查询好友信息
+        while (res->next()) {
+            auto friend_id = res->getInt("friend_id");
+            auto back = res->getString("back");
+
             auto user_info = GetUser(friend_id);
-            if (user_info) {
-                user_info->back = user_info->name;
-                user_info_list.push_back(user_info);
+            if (user_info == nullptr) {
+                continue;
             }
+
+            user_info->back = user_info->name;
+            user_info_list.push_back(user_info);
         }
         return true;
-    } catch (mysqlpp::Exception& e) {
-        std::cerr << "MySQL++ Exception: " << e.what() << std::endl;
+    } catch (sql::SQLException& e) {
+        std::cerr << "SQLException: " << e.what();
+        std::cerr << " (MySQL error code: " << e.getErrorCode();
+        std::cerr << ", SQLState: " << e.getSQLState() << " )" << std::endl;
         return false;
     }
+
+    return true;
 }

@@ -15,13 +15,7 @@ set(HIREDIS_LIBRARIES "/usr/lib")
 # 包含 hiredis 头文件
 include_directories(${HIREDIS_INCLUDE_DIR})
 
-# 手动指定 MySQL 路径（示例路径，根据实际安装位置调整）
-set(MySQL_INCLUDE_DIRS "/usr/include/mysql")
-set(MySQL_LIBRARIES "/usr/lib/libmysqlclient.so")
-
-# 手动指定 MySQL++ 路径
-set(MYSQL++_INCLUDE_DIRS "/usr/include/mysql++")
-set(MYSQL++_LIBRARIES "/usr/lib/libmysqlpp.so")
+set(MARIADBCPP_LIBRARIES "/usr/local/lib/mariadb/libmariadbcpp.so")
 
 # 查找 Boost 库
 find_package(Boost REQUIRED COMPONENTS filesystem system)
@@ -97,13 +91,11 @@ add_executable(
   ${SOURCES}
   ${PBSOURCES})
 
-target_include_directories(ChatServer PRIVATE ${MySQL_INCLUDE_DIRS}
-                                              ${MYSQL++_INCLUDE_DIRS})
+target_include_directories(ChatServer PRIVATE)
 
 target_link_libraries(
   ChatServer
-  PRIVATE ${MySQL_LIBRARIES}
-          ${MYSQL++_LIBRARIES}
+  PRIVATE ${MARIADBCPP_LIBRARIES}
           ${Boost_LIBRARIES}
           ${_REFLECTION}
           ${_GRPC_GRPCPP}
