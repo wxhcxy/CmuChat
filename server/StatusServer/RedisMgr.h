@@ -171,6 +171,12 @@ public:
 		_con_pool->Close();
 		_con_pool->ClearConnections();
 	}
+
+    //分布式加锁
+    std::string acquireLock(const std::string& lockName, int lockTimeout, int acquireTimeout);
+    //分布式解锁
+    bool releaseLock(const std::string& lockName, const std::string& identifier);
+
 private:
 	RedisMgr();
 	unique_ptr<RedisConPool>  _con_pool;

@@ -76,7 +76,8 @@ add_executable(
   AsioIOServicePool.h
   AsioIOServicePool.cpp
   MysqlDao.h
-  MysqlDao.cpp)
+  MysqlDao.cpp
+  DistLock.h DistLock.cpp)
 
 target_include_directories(StatusServer PRIVATE)
 
