@@ -1,12 +1,13 @@
 #include "RedisMgr.h"
-#include "const.h"
 #include "ConfigMgr.h"
+#include "DistLock.h"
+#include "const.h"
 RedisMgr::RedisMgr() {
 	auto& gCfgMgr = ConfigMgr::Inst();
 	auto host = gCfgMgr["Redis"]["Host"];
 	auto port = gCfgMgr["Redis"]["Port"];
 	auto pwd = gCfgMgr["Redis"]["Passwd"];
-	_con_pool.reset(new RedisConPool(5, host.c_str(), atoi(port.c_str()), pwd.c_str()));
+    _con_pool.reset(new RedisConPool(10, host.c_str(), atoi(port.c_str()), pwd.c_str()));
 }
 
 RedisMgr::~RedisMgr() {
@@ -397,4 +398,31 @@ bool RedisMgr::ExistsKey(const std::string &key)
 	return true;
 }
 
+//封装加锁操作
+std::string RedisMgr::acquireLock(const std::string& lockName, int lockTimeout, int acquireTimeout)
+{
+    auto connect = _con_pool->getConnection();
+    if (connect == nullptr) {
+        return "";
+    }
 
+    Defer defer([&connect, this]() { _con_pool->returnConnection(connect); });
+
+    return DistLock::Inst().acquireLock(connect, lockName, lockTimeout, acquireTimeout);
+}
+
+//解锁操作
+bool RedisMgr::releaseLock(const std::string& lockName, const std::string& identifier)
+{
+    if (identifier.empty()) {
+        return true;
+    }
+    auto connect = _con_pool->getConnection();
+    if (connect == nullptr) {
+        return false;
+    }
+
+    Defer defer([&connect, this]() { _con_pool->returnConnection(connect); });
+
+    return DistLock::Inst().releaseLock(connect, lockName, identifier);
+}

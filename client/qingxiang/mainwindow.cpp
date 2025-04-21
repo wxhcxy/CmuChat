@@ -1,6 +1,7 @@
 #include "mainwindow.h"
-#include "ui_mainwindow.h"
+#include <QMessageBox>
 #include "tcpmgr.h"
+#include "ui_mainwindow.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -10,8 +11,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     _login_dlg = new LoginDialog(this);
     _login_dlg->setWindowFlags(Qt::CustomizeWindowHint|Qt::FramelessWindowHint);
-    setCentralWidget(_login_dlg);
     _login_dlg->show();
+
+    setCentralWidget(_login_dlg);
 
     //创建和注册信号消息连接
     connect(_login_dlg, &LoginDialog::switchRegister, this, &MainWindow::SlotSwitchReg);
@@ -21,6 +23,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     //连接创建聊天界面信号
     connect(TcpMgr::GetInstance().get(),&TcpMgr::sig_swich_chatdlg, this, &MainWindow::SlotSwitchChat);
+
+    //链接离线消息
+    connect(TcpMgr::GetInstance().get(),
+            &TcpMgr::sig_notify_offline,
+            this,
+            &MainWindow::SlotOffline);
     //emit TcpMgr::GetInstance()->sig_swich_chatdlg();    //测试用
 
 }
@@ -107,8 +115,38 @@ void MainWindow::SlotSwitchChat()
     _chat_dlg = new ChatDialog();
     _chat_dlg->setWindowFlags(Qt::CustomizeWindowHint|Qt::FramelessWindowHint);
     setCentralWidget(_chat_dlg);
-    _chat_dlg->show();
-    _login_dlg->hide();
-    this->setMinimumSize(QSize(900,600));   //QSize(1050,900)
+
+    // 显式设置主窗口尺寸（关键修复）
+    this->resize(900, 600);
+    this->setMinimumSize(QSize(900, 600)); //QSize(1050,900)
     this->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+
+    _login_dlg->hide();
+    _chat_dlg->show();
+}
+
+void MainWindow::SlotOffline()
+{
+    // 使用静态方法直接弹出一个信息框
+    QMessageBox::information(this, "下线提示", "同账号异地登录，该终端下线！");
+    TcpMgr::GetInstance()->CloseConnection();
+    offlineLogin();
+}
+
+void MainWindow::offlineLogin()
+{
+    //创建一个CentralWidget, 并将其设置为MainWindow的中心部件
+    _login_dlg = new LoginDialog(this);
+    _login_dlg->setWindowFlags(Qt::CustomizeWindowHint | Qt::FramelessWindowHint);
+    setCentralWidget(_login_dlg);
+
+    _chat_dlg->hide();
+    this->setMaximumSize(300, 500);
+    this->setMinimumSize(300, 500);
+    this->resize(300, 500);
+    _login_dlg->show();
+    //连接登录界面注册信号
+    connect(_login_dlg, &LoginDialog::switchRegister, this, &MainWindow::SlotSwitchReg);
+    //连接登录界面忘记密码信号
+    connect(_login_dlg, &LoginDialog::switchReset, this, &MainWindow::SlotSwitchReset);
 }

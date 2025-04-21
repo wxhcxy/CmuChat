@@ -38,6 +38,8 @@ public:
 	std::shared_ptr<CSession> SharedSelf();
 	void AsyncReadBody(int length);
 	void AsyncReadHead(int total_len);
+    void NotifyOffline(int uid); //通知用户下线，踢人,另一设备登陆了该账号
+
 private:
 	void asyncReadFull(std::size_t maxLength, std::function<void(const boost::system::error_code& , std::size_t)> handler);
 	void asyncReadLen(std::size_t  read_len, std::size_t total_len,

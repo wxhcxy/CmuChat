@@ -89,7 +89,8 @@ add_executable(
   MsgNode.cpp
   AsioIOServicePool.cpp
   ${SOURCES}
-  ${PBSOURCES})
+  ${PBSOURCES}
+  DistLock.h DistLock.cpp)
 
 target_include_directories(ChatServer PRIVATE)
 

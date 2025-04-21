@@ -37,7 +37,10 @@ public slots:
 
     void SlotSwitchChat();//登陆成功后，跳转聊天界面的槽函数
 
+    void SlotOffline();
+
 private:
+    void offlineLogin(); //其他地方登陆同账号，这边下线
     Ui::MainWindow *ui;
 
     LoginDialog *_login_dlg;
