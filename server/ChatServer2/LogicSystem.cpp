@@ -97,6 +97,13 @@ void LogicSystem::RegisterCallBacks() {
 	//聊天文本消息的处理
 	_fun_callbacks[ID_TEXT_CHAT_MSG_REQ] = std::bind(&LogicSystem::DealChatTextMsg, this,
 		placeholders::_1, placeholders::_2, placeholders::_3);
+
+    //心跳检测的处理
+    _fun_callbacks[ID_HEART_BEAT_REQ] = std::bind(&LogicSystem::HeartBeatHandler,
+                                                  this,
+                                                  placeholders::_1,
+                                                  placeholders::_2,
+                                                  placeholders::_3);
 }
 
 
@@ -326,7 +333,6 @@ void LogicSystem::LoginHandler(shared_ptr<CSession> session, const short &msg_id
         RedisMgr::GetInstance()->Set(uid_session_key, session->GetSessionId());
     }
 
-    RedisMgr::GetInstance()->IncreaseCount(server_name);
     return;
 }
 
@@ -759,4 +765,18 @@ void LogicSystem::DealChatTextMsg(std::shared_ptr<CSession> session, const short
 
 	//发送通知 todo...
 	ChatGrpcClient::GetInstance()->NotifyTextChatMsg(to_ip_value, text_msg_req, rtvalue);
+}
+
+void LogicSystem::HeartBeatHandler(std::shared_ptr<CSession> session,
+                                   const short& msg_id,
+                                   const string& msg_data)
+{
+    Json::Reader reader;
+    Json::Value root;
+    reader.parse(msg_data, root);
+    auto uid = root["fromuid"].asInt(); //fromuid是谁发过来的
+    std::cout << "receive heart beat msg, from uid is " << uid << std::endl;
+    Json::Value rtvalue;
+    rtvalue["error"] = ErrorCodes::Success;
+    session->Send(rtvalue.toStyledString(), ID_HEARTBEAT_RSP);
 }

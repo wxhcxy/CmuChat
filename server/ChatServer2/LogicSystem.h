@@ -33,11 +33,14 @@ private:
 	void AddFriendApply(std::shared_ptr<CSession> session, const short& msg_id, const string& msg_data);
 	void AuthFriendApply(std::shared_ptr<CSession> session, const short& msg_id, const string& msg_data);
 	void DealChatTextMsg(std::shared_ptr<CSession> session, const short& msg_id, const string& msg_data);//处理用户发送的文本消息
-	
-	bool isPureDigit(const std::string& str);
-	void GetUserByUid(std::string uid_str, Json::Value& rtvalue);
-	void GetUserByName(std::string name, Json::Value& rtvalue);
-	bool GetBaseInfo(std::string base_key, int uid, std::shared_ptr<UserInfo>& userinfo);
+    void HeartBeatHandler(std::shared_ptr<CSession> session,
+                          const short& msg_id,
+                          const string& msg_data); //心跳检测的处理
+
+    bool isPureDigit(const std::string& str);
+    void GetUserByUid(std::string uid_str, Json::Value& rtvalue);
+    void GetUserByName(std::string name, Json::Value& rtvalue);
+    bool GetBaseInfo(std::string base_key, int uid, std::shared_ptr<UserInfo>& userinfo);
 	bool GetFriendApplyInfo(int to_uid, std::vector<std::shared_ptr<ApplyInfo>>& list);
 	bool GetFriendList(int self_id, std::vector<std::shared_ptr<UserInfo>>& user_list);
 	

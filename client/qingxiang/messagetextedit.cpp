@@ -152,17 +152,31 @@ bool MessageTextEdit::canInsertFromMimeData(const QMimeData *source) const
 
 void MessageTextEdit::insertFromMimeData(const QMimeData *source)
 {
-    QStringList urls = getUrl(source->text());
+    // QStringList urls = getUrl(source->text());
 
-    if(urls.isEmpty())
-        return;
+    // if(urls.isEmpty())
+    //     return;
 
-    foreach (QString url, urls)
-    {
-        if(isImage(url))
-            insertImages(url);
-        else
-            insertTextFile(url);
+    // foreach (QString url, urls)
+    // {
+    //     if(isImage(url))
+    //         insertImages(url);
+    //     else
+    //         insertTextFile(url);
+    // }
+
+    // 处理文件拖放或粘贴
+    if (source->hasUrls()) {
+        QStringList urls;
+        foreach (QUrl url, source->urls()) {
+            urls.append(url.toLocalFile());
+        }
+        insertFileFromUrl(urls);
+    }
+
+    // 处理纯文本粘贴
+    if (source->hasText()) {
+        QTextEdit::insertFromMimeData(source);
     }
 }
 

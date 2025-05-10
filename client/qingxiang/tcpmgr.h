@@ -48,6 +48,8 @@ signals:
     void sig_text_chat_msg(std::shared_ptr<TextChatMsg> msg);
 
     void sig_notify_offline();
+
+    void sig_connection_closed(); //测试心跳检测
 };
 
 #endif // TCPMGR_H

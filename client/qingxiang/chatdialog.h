@@ -2,10 +2,11 @@
 #define CHATDIALOG_H
 
 #include <QDialog>
+#include <QListWidgetItem>
+#include <QTimer>
 #include "global.h"
 #include "statewidget.h"
 #include "userdata.h"
-#include <QListWidgetItem>
 
 namespace Ui {
 class ChatDialog;
@@ -37,6 +38,7 @@ private:
     void SetSelectChatItem(int uid = 0);
     void SetSelectChatPage(int uid = 0);
     int _cur_chat_uid;
+    QTimer *_timer;
 
     void loadMoreChatUser();    //加载聊天记录联系人
     void loadMoreConUser(); //加载好友列表联系人

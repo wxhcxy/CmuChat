@@ -1,11 +1,13 @@
 #include "chatdialog.h"
-#include "ui_chatdialog.h"
-#include <QRandomGenerator>//随机数生成器
+#include <QByteArray>
+#include <QJsonDocument>
+#include <QRandomGenerator> //随机数生成器
 #include "chatuserwid.h"
+#include "conuseritem.h"
 #include "loadingdlg.h"
 #include "tcpmgr.h"
+#include "ui_chatdialog.h"
 #include "usermgr.h"
-#include "conuseritem.h"
 
 ChatDialog::ChatDialog(QWidget *parent)
     : QDialog(parent)
@@ -143,14 +145,24 @@ ChatDialog::ChatDialog(QWidget *parent)
     connect(TcpMgr::GetInstance().get(), &TcpMgr::sig_text_chat_msg,
             this, &ChatDialog::slot_text_chat_msg);
 
+    _timer = new QTimer(this);
+    connect(_timer, &QTimer::timeout, this, [this]() {
+        auto user_info = UserMgr::GetInstance()->GetUserInfo();
+        QJsonObject textObj;
+        textObj["fromuid"] = user_info->_uid;
+        QJsonDocument doc(textObj);
+        QByteArray jsonData = doc.toJson(QJsonDocument::Compact);
+        emit TcpMgr::GetInstance()->sig_send_data(ReqId::ID_HEART_BEAT_REQ, jsonData);
+    });
+    _timer->start(10000); //每10秒触发一次定时器，发送数据给服务器
 
     //连接清除搜索框操作
     //connect(ui->friend_apply_page, &ApplyFriendPage::sig_show_search, this, &ChatDialog::slot_show_search);
-
 }
 
 ChatDialog::~ChatDialog()
 {
+    _timer->start(10000);
     delete ui;
 }
 
